@@ -24,6 +24,7 @@ namespace AAEmu.Game.Core.Managers
         private Dictionary<uint, House> _houses;
         private Dictionary<ushort, House> _housesTl; // TODO or so mb tlId is id in the active zone? or type of house
         private List<uint> _removedHousings;
+        private static uint BUFF_UNTOUCHABLE = 545;
 
         public Dictionary<uint, House> GetByAccountId(Dictionary<uint, House> values, uint accountId)
         {
@@ -45,9 +46,21 @@ namespace AAEmu.Game.Core.Managers
             house.ObjId = objectId > 0 ? objectId : ObjectIdManager.Instance.GetNextId();
             house.Template = template;
             house.TemplateId = template.Id;
-            house.Faction = FactionManager.Instance.GetFaction(1); // TODO frandly
+            house.Faction = FactionManager.Instance.GetFaction(1); // TODO: Inherit from owner
             house.Name = template.Name;
             house.Hp = house.MaxHp;
+
+            // Permanent Untouchable buff, remove the buff when failed tax payment
+            var protectionBuffTemplate = SkillManager.Instance.GetBuffTemplate(BUFF_UNTOUCHABLE);
+            if (protectionBuffTemplate != null)
+            {
+                var casterObj = new Models.Game.Skills.SkillCasterUnit(house.ObjId);
+                house.Effects.AddEffect(new Models.Game.Skills.Effect(house, house, casterObj, protectionBuffTemplate, null, System.DateTime.Now));
+            }
+            else
+            {
+                _log.Error("Unable to find Untouchable buff template");
+            }
 
             return house;
         }
@@ -239,6 +252,7 @@ namespace AAEmu.Game.Core.Managers
                             house.Permission = (HousingPermission)reader.GetByte("permission");
                             _houses.Add(house.Id, house);
                             _housesTl.Add(house.TlId, house);
+                            UpdateTaxInfo(house);
                             house.IsDirty = false;
                         }
                     }
@@ -323,7 +337,7 @@ namespace AAEmu.Game.Core.Managers
                     0,
                     baseTax,
                     depositTax, // Amount Due
-                    DateTime.Now.AddDays(30),
+                    house.ProtectionEndDate,
                     true,
                     -1,
                     false
@@ -357,6 +371,7 @@ namespace AAEmu.Game.Core.Managers
             house.PlaceDate = DateTime.Now;
             _houses.Add(house.Id, house);
             _housesTl.Add(house.TlId, house);
+            UpdateTaxInfo(house);
 
             connection.ActiveChar.SendPacket(new SCMyHousePacket(house));
             house.Spawn();
@@ -406,9 +421,12 @@ namespace AAEmu.Game.Core.Managers
         public void Demolish(GameConnection connection, House house)
         {
             if (!_houses.ContainsKey(house.Id))
-                return; // TODO send error
+                return; // TODO: Send error
+            // Check if owner
             if (house.OwnerId == connection.ActiveChar.Id)
             {
+                // TODO: check if tax payed, cannot manually demolish or sell a house with unpaid taxes
+
                 _removedHousings.Add(house.Id);
                 _houses.Remove(house.Id);
                 _housesTl.Remove(house.TlId);
@@ -422,8 +440,14 @@ namespace AAEmu.Game.Core.Managers
             }
             else
             {
-                // TODO send error...
+                // TODO: Send error...
+                // Non-owner should not be able to press demolish
             }
+        }
+
+        public void UpdateTaxInfo(House house)
+        {
+            // TODO:
         }
     }
 }

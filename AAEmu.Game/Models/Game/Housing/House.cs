@@ -41,6 +41,7 @@ namespace AAEmu.Game.Models.Game.Housing
         private HousingPermission _permission;
         private int _numAction;
         private DateTime _placeDate;
+        private DateTime _protectionEndDate;
 
         /// <summary>
         /// IsDirty flag for Houses, not all properties are taken into account here as most of the data that needs to be updated will never change
@@ -104,6 +105,7 @@ namespace AAEmu.Game.Models.Game.Housing
             }
         }
         public DateTime PlaceDate { get => _placeDate; set { _placeDate = value; _isDirty = true; } }
+        public DateTime ProtectionEndDate { get => _protectionEndDate; set { _protectionEndDate = value; _isDirty = true; } }
 
         public override int MaxHp => Template.Hp;
         public override UnitCustomModelParams ModelParams { get; set; }
