@@ -19,6 +19,8 @@ using NLog.Targets;
 using System.ComponentModel.DataAnnotations;
 using AAEmu.Game.Core.Managers.Id;
 using AAEmu.Game.Models.Tasks.Mails;
+using AAEmu.Game.Models.Game.Error;
+using AAEmu.Game.Models.Game.Features;
 
 namespace AAEmu.Game.Core.Managers
 {
@@ -126,7 +128,7 @@ namespace AAEmu.Game.Core.Managers
                 Title = mailTemplate.Header.Title,
                 Text = text,
                 CopperCoins = moneyAmounts[0],
-                MoneyAmount1 = moneyAmounts[1],
+                BillingAmount = moneyAmounts[1],
                 MoneyAmount2 = moneyAmounts[2],
                 SendDate = DateTime.UtcNow,
                 RecvDate = DateTime.UtcNow,
@@ -196,11 +198,11 @@ namespace AAEmu.Game.Core.Managers
                             tempMail.Header.ReceiverId = reader.GetUInt32("receiver_id");
                             tempMail.Header.OpenDate = reader.GetDateTime("open_date");
                             tempMail.Header.Returned = (reader.GetInt32("returned") != 0);
-                            tempMail.Header.Extra = reader.GetUInt32("extra");
+                            tempMail.Header.Extra = reader.GetInt64("extra");
 
                             tempMail.Body.Text = reader.GetString("text");
                             tempMail.Body.CopperCoins = reader.GetInt32("money_amount_1");
-                            tempMail.Body.MoneyAmount1 = reader.GetInt32("money_amount_2");
+                            tempMail.Body.BillingAmount = reader.GetInt32("money_amount_2");
                             tempMail.Body.MoneyAmount2 = reader.GetInt32("money_amount_3");
                             tempMail.Body.SendDate = reader.GetDateTime("send_date");
                             tempMail.Body.RecvDate = reader.GetDateTime("received_date");
@@ -228,12 +230,12 @@ namespace AAEmu.Game.Core.Managers
                             var attachmentCount = tempMail.Body.Attachments.Count;
                             if (tempMail.Body.CopperCoins > 0)
                                 attachmentCount++;
-                            if (tempMail.Body.MoneyAmount1 > 0)
+                            if (tempMail.Body.BillingAmount > 0)
                                 attachmentCount++;
                             if (tempMail.Body.MoneyAmount2 > 0)
                                 attachmentCount++;
                             if (attachmentCount != tempMail.Header.Attachments)
-                                _log.Warn("Attachment count listed in mailId {0} did not match the number of attachments, possible mail or item corruption !");
+                                _log.Warn("Attachment count listed in mailId {0} did not match the number of attachments, possible mail or item corruption !", tempMail.Id);
                             // Reset the attachment counter
                             tempMail.Header.Attachments = (byte)attachmentCount;
 
@@ -316,7 +318,7 @@ namespace AAEmu.Game.Core.Managers
                     command.Parameters.AddWithValue("@returned", mtbs.Value.Header.Returned ? 1 : 0);
                     command.Parameters.AddWithValue("@extra", mtbs.Value.Header.Extra);
                     command.Parameters.AddWithValue("@money1", mtbs.Value.Body.CopperCoins);
-                    command.Parameters.AddWithValue("@money2", mtbs.Value.Body.MoneyAmount1);
+                    command.Parameters.AddWithValue("@money2", mtbs.Value.Body.BillingAmount);
                     command.Parameters.AddWithValue("@money3", mtbs.Value.Body.MoneyAmount2);
 
                     for (var i = 0; i < MailBody.MaxMailAttachments; i++)
@@ -358,7 +360,7 @@ namespace AAEmu.Game.Core.Managers
         {
             _log.Trace("NotifyNewMailByNameIfOnline() - {0}", receiverName);
             // If unread and ready to deliver
-            if ((m.Header.Status == 0) && (m.Body.RecvDate <= DateTime.UtcNow))
+            if ((m.Header.Status != MailStatus.Read) && (m.Body.RecvDate <= DateTime.UtcNow) && (m.IsDelivered == false))
             {
                 var player = WorldManager.Instance.GetCharacter(receiverName);
                 if (player != null)
@@ -385,6 +387,105 @@ namespace AAEmu.Game.Core.Managers
                 _log.Debug("{0}/{1} mail(s) delivered", delivered, undeliveredMails.Count);
 
             // TODO: Return expired mails back to owner if undelivered/unread
+        }
+
+        public bool PayChargeMoney(Character character, long mailId, bool autoUseAAPoint)
+        {
+            var mail = GetMailById(mailId);
+            if (mail == null)
+            {
+                character.SendErrorMessage(ErrorMessageType.MailInvalid);
+                return false;
+            }
+
+            // Only tax mail supported
+            if (mail.MailType != MailType.Billing)
+            {
+                character.SendErrorMessage(ErrorMessageType.MailInvalid);
+                return false;
+            }
+            mail.Header.Status = MailStatus.Read;
+
+            var houseId = (uint)(mail.Header.Extra & 0xFFFFFFFF); // Extract house DB Id from Extra
+            var houseZoneGroup = ((mail.Header.Extra >> 48) & 0xFFFF); // Extract zone group Id from Extra
+            var house = HousingManager.Instance.GetHouseById(houseId);
+
+            if (house == null)
+            {
+                character.SendErrorMessage(ErrorMessageType.InvalidHouseInfo);
+                return false;
+            }
+
+            var fsets = new FeatureSet();
+            var useTaxCertificates = fsets.Check(Feature.taxItem);
+
+            if (useTaxCertificates)
+            {
+                // use Tax Certificates as payment
+                // TODO: grab these values from DB somewhere ?
+                var userTaxCount = character.Inventory.GetItemsCount(SlotType.Inventory, Item.TaxCertificate);
+                var userBoundTaxCount = character.Inventory.GetItemsCount(SlotType.Inventory, Item.BoundTaxCertificate);
+                var totatUserTaxCount = userTaxCount + userBoundTaxCount;
+                var consumedCerts = (int)Math.Ceiling(mail.Body.BillingAmount / 10000f);
+
+                if (totatUserTaxCount < consumedCerts)
+                {
+                    // Not enough certs
+                    character.SendErrorMessage(ErrorMessageType.MailNotEnoughMoneyToPayTaxes);
+                    return false;
+                }
+                else
+                {
+                    var c = consumedCerts;
+                    // Use Bound First
+                    if ((userBoundTaxCount > 0) && (c > 0))
+                    {
+                        if (c > userBoundTaxCount)
+                            c = userBoundTaxCount;
+                        character.Inventory.ConsumeItem(new SlotType[] { SlotType.Inventory }, Models.Game.Items.Actions.ItemTaskType.Mail, Item.BoundTaxCertificate, c, null);
+                        consumedCerts -= c;
+                    }
+                    c = consumedCerts;
+                    if ((userTaxCount > 0) && (c > 0))
+                    {
+                        if (c > userTaxCount)
+                            c = userTaxCount;
+                        character.Inventory.ConsumeItem(new SlotType[] { SlotType.Inventory }, Models.Game.Items.Actions.ItemTaskType.Mail, Item.TaxCertificate, c, null);
+                        consumedCerts -= c;
+                    }
+
+                    if (consumedCerts != 0)
+                        _log.Error("Something went wrong when paying tax for mailId {0}", mail.Id);
+
+                    mail.Body.BillingAmount = consumedCerts ;
+
+                }
+            }
+            else
+            {
+                // use gold as payment
+                if (mail.Body.BillingAmount > character.Money)
+                {
+                    // Not enough gold
+                    character.SendErrorMessage(ErrorMessageType.MailNotEnoughMoneyToPayTaxes);
+                    return false;
+                }
+                else
+                {
+                    character.ChangeMoney(SlotType.Inventory, mail.Body.BillingAmount);
+                }
+
+            }
+
+            if (!HousingManager.Instance.PayWeeklyTax(house))
+                _log.Error("Could not update protection time when paying taxes, mailId {0}", mail.Id);
+            else
+            {
+                character.SendPacket(new SCMailDeletedPacket(false, mail.Id, false, character.Mails.unreadMailCount));
+                DeleteMail(mail);
+            }
+
+            return true;
         }
 
     }

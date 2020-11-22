@@ -81,6 +81,8 @@ namespace AAEmu.Game.Models.Game.Items
         // Helper
         public ItemContainer _holdingContainer { get; set; }
         public static uint Coins = 500;
+        public static uint TaxCertificate = 31891;
+        public static uint BoundTaxCertificate = 31892;
 
         /// <summary>
         /// Sort will use itemSlot numbers

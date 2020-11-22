@@ -282,7 +282,7 @@ namespace AAEmu.Game.Models.Game.Char
                 }
 
                 SendMailToPlayer(thisMail.Header.Type, thisMail.Header.SenderName, thisMail.Header.Title, thisMail.Body.Text, 
-                    thisMail.Header.Attachments, thisMail.Body.CopperCoins, thisMail.Body.MoneyAmount1, thisMail.Body.MoneyAmount2,
+                    thisMail.Header.Attachments, thisMail.Body.CopperCoins, thisMail.Body.BillingAmount, thisMail.Body.MoneyAmount2,
                         thisMail.Header.Extra, itemSlots);
 
                 DeleteMail(id, false);

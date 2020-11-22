@@ -55,7 +55,7 @@ namespace AAEmu.Game.Models.Game.Mails
             var res = (byte)Body.Attachments.Count;
             if (Body.CopperCoins != 0)
                 res++;
-            if (Body.MoneyAmount1 != 0)
+            if (Body.BillingAmount != 0)
                 res++;
             if (Body.MoneyAmount2 != 0)
                 res++;
@@ -71,7 +71,7 @@ namespace AAEmu.Game.Models.Game.Mails
         public void AttachMoney(int copperCoinsAmount, int money1Amount = 0, int money2Amount = 0)
         {
             Body.CopperCoins = copperCoinsAmount;
-            Body.MoneyAmount1 = money1Amount;
+            Body.BillingAmount = money1Amount;
             Body.MoneyAmount2 = money2Amount;
             Header.Attachments = GetTotalAttachmentCount();
         }

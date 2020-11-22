@@ -1,4 +1,5 @@
 ﻿using System;
+using AAEmu.Game.Core.Packets.G2C;
 using AAEmu.Game.Core.Managers;
 using AAEmu.Game.Core.Managers.Id;
 using AAEmu.Game.Core.Managers.UnitManagers;
@@ -6,9 +7,9 @@ using AAEmu.Game.Core.Managers.World;
 using AAEmu.Game.Models.Game;
 using AAEmu.Game.Models.Game.Char;
 using AAEmu.Game.Models.Game.Units;
-using AAEmu.Game.Core.Packets.G2C;
 using AAEmu.Game.Models.Game.Items;
 using AAEmu.Game.Models.Game.Mails;
+using AAEmu.Game.Models.Game.Housing;
 
 namespace AAEmu.Game.Scripts.Commands
 {
@@ -22,7 +23,7 @@ namespace AAEmu.Game.Scripts.Commands
 
         public string GetCommandLineHelp()
         {
-            return "<mailtype> [sendername] [title] [body] [money] [extraflag] [attachmentitems ID/Counts]";
+            return "<mailtype> [sendername] [title] [body] [money] [billing] [attachmentitems ID/Counts]";
         }
 
         public string GetCommandHelpText()
@@ -73,6 +74,19 @@ namespace AAEmu.Game.Scripts.Commands
                         character.SendMessage("[TestMail] Clear List of Mails");
                         foreach (var m in MailManager.Instance.GetCurrentMailList(character))
                             character.Mails.DeleteMail(m.Value.Id, false);
+                        return;
+                    case "tax":
+                        if ((character.CurrentTarget != null) && (character.CurrentTarget is House house))
+                        {
+                            var newMail = new MailForTax(house);
+                            newMail.Finalize();
+                            newMail.Send();
+                            character.SendMessage("[TestMail] Created tax for selected building");
+                        }
+                        else
+                        {
+                            character.SendMessage("[TestMail] please select a building first");
+                        }
                         return;
                     default:
                         if (MailType.TryParse(args[0], out MailType mTypeByName))
@@ -147,14 +161,14 @@ namespace AAEmu.Game.Scripts.Commands
                 if (args.Length > 5)
                 {
                     var n = args[5];
-                    if (int.TryParse(n, out var extraFlag))
+                    if (int.TryParse(n, out var billing))
                     {
-                        mail.Header.Extra = extraFlag;
-                        character.SendMessage("[TestMail] Extra: {0}", extraFlag);
+                        mail.Body.BillingAmount = billing;
+                        character.SendMessage("[TestMail] BillingCost: {0}", billing);
                     }
                     else
                     {
-                        character.SendMessage("[TestMail] Extra Flag parse error");
+                        character.SendMessage("[TestMail] Billing Cost parse error");
                     }
                 }
 

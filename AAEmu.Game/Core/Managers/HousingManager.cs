@@ -26,12 +26,12 @@ namespace AAEmu.Game.Core.Managers
         private List<uint> _removedHousings;
         private static uint BUFF_UNTOUCHABLE = 545;
 
-        public Dictionary<uint, House> GetByAccountId(Dictionary<uint, House> values, uint accountId)
+        public int GetByAccountId(Dictionary<uint, House> values, uint accountId)
         {
             foreach (var (id, house) in _houses)
                 if (house.AccountId == accountId)
                     values.Add(id, house);
-            return values;
+            return values.Count;
         }
 
         public House Create(uint templateId, uint objectId = 0, ushort tlId = 0)
@@ -250,6 +250,8 @@ namespace AAEmu.Game.Core.Managers
                             house.CurrentStep = reader.GetInt32("current_step");
                             house.NumAction = reader.GetInt32("current_action");
                             house.Permission = (HousingPermission)reader.GetByte("permission");
+                            house.PlaceDate = reader.GetDateTime("place_date");
+                            house.ProtectionEndDate = reader.GetDateTime("protected_until");
                             _houses.Add(house.Id, house);
                             _housesTl.Add(house.TlId, house);
                             UpdateTaxInfo(house);
@@ -368,7 +370,8 @@ namespace AAEmu.Game.Core.Managers
             house.CoOwnerId = connection.ActiveChar.Id;
             house.AccountId = connection.AccountId;
             house.Permission = HousingPermission.Public;
-            house.PlaceDate = DateTime.Now;
+            house.PlaceDate = DateTime.UtcNow;
+            house.ProtectionEndDate = DateTime.UtcNow.AddDays(7);
             _houses.Add(house.Id, house);
             _housesTl.Add(house.TlId, house);
             UpdateTaxInfo(house);
@@ -445,9 +448,51 @@ namespace AAEmu.Game.Core.Managers
             }
         }
 
+        public bool GetWeeklyTaxInfo(House house, out int weeklyTax, out int heavyHouseCount, out int normalHouseCount, out int hostileTaxRate)
+        {
+            weeklyTax = 0;
+            heavyHouseCount = 0;
+            normalHouseCount = 0;
+            hostileTaxRate = 0; // NOTE: When castles are added, this needs to be updated depending on ruling guild's settings
+            var maxheavyCounted = 10; // Maximum number of heavy tax buildings to take into account for tax calculation
+
+            Dictionary<uint, House> userHouses = new Dictionary<uint, House>();
+            if (GetByAccountId(userHouses, house.AccountId) <= 0)
+                return false;
+
+            foreach (var h in userHouses)
+            {
+                if (h.Value.Template.HeavyTax)
+                    heavyHouseCount++;
+                else
+                    normalHouseCount++;
+            }
+
+            var taxMultiplier = (heavyHouseCount < maxheavyCounted ? heavyHouseCount : maxheavyCounted) * 0.5f;
+            if (heavyHouseCount < 3)
+                taxMultiplier = 1f;
+
+            weeklyTax = (int)Math.Ceiling(house.Template.Taxation.Tax * taxMultiplier);
+
+            return true;
+        }
+
         public void UpdateTaxInfo(House house)
         {
-            // TODO:
+            // TODO: update corresponding mails if needed
+        }
+
+        public bool PayWeeklyTax(House house)
+        {
+            house.ProtectionEndDate = house.ProtectionEndDate.AddDays(7);
+            return true;
+        }
+
+        public House GetHouseById(uint houseId)
+        {
+            if (_houses.TryGetValue(houseId, out var house))
+                return house;
+            return null;
         }
     }
 }

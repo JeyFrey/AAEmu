@@ -228,8 +228,8 @@ namespace AAEmu.Game.Models.Game.Housing
 
                 command.CommandText =
                     "REPLACE INTO `housings` " +
-                    "(`id`,`account_id`,`owner`,`co_owner`,`template_id`,`name`,`x`,`y`,`z`,`rotation_z`,`current_step`,`current_action`,`permission`) " +
-                    "VALUES(@id,@account_id,@owner,@co_owner,@template_id,@name,@x,@y,@z,@rotation_z,@current_step,@current_action,@permission)";
+                    "(`id`,`account_id`,`owner`,`co_owner`,`template_id`,`name`,`x`,`y`,`z`,`rotation_z`,`current_step`,`current_action`,`permission`,`place_date`,`protected_until`) " +
+                    "VALUES(@id,@account_id,@owner,@co_owner,@template_id,@name,@x,@y,@z,@rotation_z,@current_step,@current_action,@permission,@placedate,@protecteduntil)";
 
                 command.Parameters.AddWithValue("@id", Id);
                 command.Parameters.AddWithValue("@account_id", AccountId);
@@ -244,6 +244,8 @@ namespace AAEmu.Game.Models.Game.Housing
                 command.Parameters.AddWithValue("@current_step", CurrentStep);
                 command.Parameters.AddWithValue("@current_action", NumAction);
                 command.Parameters.AddWithValue("@permission", (byte)Permission);
+                command.Parameters.AddWithValue("@placedate", PlaceDate);
+                command.Parameters.AddWithValue("@protecteduntil", ProtectionEndDate);
                 command.ExecuteNonQuery();
             }
             return true;
