@@ -8,12 +8,16 @@ using AAEmu.Game.Core.Managers.Id;
 using AAEmu.Game.Core.Managers.World;
 using AAEmu.Game.Core.Network.Connections;
 using AAEmu.Game.Core.Packets.G2C;
+using AAEmu.Game.Models.Game.Char;
 using AAEmu.Game.Models.Game.Housing;
+using AAEmu.Game.Models.Game.Items;
 using AAEmu.Game.Models.Game.World;
 using AAEmu.Game.Utils;
 using AAEmu.Game.Utils.DB;
+using AAEmu.Game.Models.Game.Error;
 using MySql.Data.MySqlClient;
 using NLog;
+using AAEmu.Game.Models.Game.Mails;
 
 namespace AAEmu.Game.Core.Managers
 {
@@ -25,6 +29,7 @@ namespace AAEmu.Game.Core.Managers
         private Dictionary<ushort, House> _housesTl; // TODO or so mb tlId is id in the active zone? or type of house
         private List<uint> _removedHousings;
         private static uint BUFF_UNTOUCHABLE = 545;
+        private static int MAX_HEAVY_TAX_COUNTED = 10; // Maximum number of heavy tax buildings to take into account for tax calculation
 
         public int GetByAccountId(Dictionary<uint, House> values, uint accountId)
         {
@@ -47,6 +52,7 @@ namespace AAEmu.Game.Core.Managers
             house.Template = template;
             house.TemplateId = template.Id;
             house.Faction = FactionManager.Instance.GetFaction(1); // TODO: Inherit from owner
+            // TODO: Localize this name, where do I find the name ?
             house.Name = template.Name;
             house.Hp = house.MaxHp;
 
@@ -302,24 +308,21 @@ namespace AAEmu.Game.Core.Managers
         {
             // TODO validation position and some range...
 
-            var template = _housingTemplates[designId];
-            var baseTax = (int)(template.Taxation?.Tax ?? 0);
-            var depositTax = baseTax * 2;
-            var totalTax = baseTax + depositTax;
+            var houseTemplate = _housingTemplates[designId];
 
-            var heavyTaxHouseCount = connection.Houses.Values
-                .Count(house => house.OwnerId == connection.ActiveChar.Id && house.Template.HeavyTax);
-            var normalTaxHouseCount = connection.Houses.Values
-                .Count(house => house.OwnerId == connection.ActiveChar.Id && !house.Template.HeavyTax);
+            CalculateBuildingTaxInfo(connection.ActiveChar.AccountId, houseTemplate, true, out var totalTaxAmountDue, out var heavyTaxHouseCount, out var normalTaxHouseCount, out var hostileTaxRate);
+
+            var baseTax = (int)(houseTemplate.Taxation?.Tax ?? 0);
+            var depositTax = baseTax * 2;
 
             connection.SendPacket(
                 new SCConstructHouseTaxPacket(designId,
                     heavyTaxHouseCount,
                     normalTaxHouseCount,
-                    template.HeavyTax,
+                    houseTemplate.HeavyTax,
                     baseTax,
                     depositTax,
-                    totalTax
+                    totalTaxAmountDue
                 )
             );
         }
@@ -330,6 +333,9 @@ namespace AAEmu.Game.Core.Managers
                 return;
 
             var house = _housesTl[tlId];
+
+            CalculateBuildingTaxInfo(house.AccountId, house.Template, false, out var totalTaxAmountDue, out var heavyTaxHouseCount, out var normalTaxHouseCount, out var hostileTaxRate);
+
             var baseTax = (int)(house.Template.Taxation?.Tax ?? 0);
             var depositTax = baseTax * 2;
 
@@ -338,11 +344,11 @@ namespace AAEmu.Game.Core.Managers
                     house.TlId,
                     0,
                     baseTax,
-                    depositTax, // Amount Due
+                    totalTaxAmountDue, // Amount Due
                     house.ProtectionEndDate,
                     true,
                     -1,
-                    false
+                    house.Template.HeavyTax
                 )
             );
         }
@@ -354,8 +360,87 @@ namespace AAEmu.Game.Core.Managers
             // TODO remove itemId
             // TODO minus moneyAmount
 
+            var sourceDesignItem = connection.ActiveChar.Inventory.GetItemById(itemId);
+            if ((sourceDesignItem == null) && (sourceDesignItem.OwnerId != connection.ActiveChar.Id))
+            {
+                // Invalid itemId supplied or the id is not owned by the user
+                connection.ActiveChar.SendErrorMessage(ErrorMessageType.BagInvalidItem);
+                return;
+            }
+
+
             var zoneId = WorldManager.Instance.GetZoneId(1, position.X, position.Y);
+
+            var houseTemplate = _housingTemplates[designId];
+            CalculateBuildingTaxInfo(connection.ActiveChar.AccountId, houseTemplate, true, out var totalTaxAmountDue, out var heavyTaxHouseCount, out var normalTaxHouseCount, out var hostileTaxRate);
+
+            if (FeaturesManager.Fsets.Check(Models.Game.Features.Feature.taxItem))
+            {
+                // Pay in Tax Certificate
+
+                var userTaxCount = connection.ActiveChar.Inventory.GetItemsCount(SlotType.Inventory, Item.TaxCertificate);
+                var userBoundTaxCount = connection.ActiveChar.Inventory.GetItemsCount(SlotType.Inventory, Item.BoundTaxCertificate);
+                var totatUserTaxCount = userTaxCount + userBoundTaxCount;
+                var totalCertsCost = (int)Math.Ceiling(totalTaxAmountDue / 10000f);
+
+                // Alloyingly complex item consumption, maybe we need a seperate function in inventory to handle this kind of thing
+                var consumedCerts = totalCertsCost;
+                if (totalCertsCost > totatUserTaxCount)
+                {
+                    connection.ActiveChar.SendErrorMessage(ErrorMessageType.MailNotEnoughMoneyToPayTaxes);
+                    return;
+                }
+                else
+                {
+                    var c = consumedCerts;
+                    // Use Bound First
+                    if ((userBoundTaxCount > 0) && (c > 0))
+                    {
+                        if (c > userBoundTaxCount)
+                            c = userBoundTaxCount;
+                        connection.ActiveChar.Inventory.Bag.ConsumeItem(Models.Game.Items.Actions.ItemTaskType.HouseCreation, Item.BoundTaxCertificate, c, null);
+                        consumedCerts -= c;
+                    }
+                    c = consumedCerts;
+                    if ((userTaxCount > 0) && (c > 0))
+                    {
+                        if (c > userTaxCount)
+                            c = userTaxCount;
+                        connection.ActiveChar.Inventory.Bag.ConsumeItem(Models.Game.Items.Actions.ItemTaskType.HouseCreation, Item.TaxCertificate, c, null);
+                        consumedCerts -= c;
+                    }
+
+                    if (consumedCerts != 0)
+                        _log.Error("Something went wrong when paying tax for new building for player {0}", connection.ActiveChar.Name);
+                }
+                
+            }
+            else
+            {
+                // Pay in Gold
+                // TODO: test house with actual gold tax
+                if (totalTaxAmountDue > connection.ActiveChar.Money)
+                {
+                    connection.ActiveChar.SendErrorMessage(ErrorMessageType.MailNotEnoughMoneyToPayTaxes);
+                    return;
+                }
+                connection.ActiveChar.SubtractMoney(SlotType.Inventory, totalTaxAmountDue,Models.Game.Items.Actions.ItemTaskType.HouseCreation);
+            }
+
+
+            if (connection.ActiveChar.Inventory.Bag.ConsumeItem(Models.Game.Items.Actions.ItemTaskType.HouseBuilding, sourceDesignItem.TemplateId, 1, sourceDesignItem) <= 0)
+            {
+                connection.ActiveChar.SendErrorMessage(ErrorMessageType.BagInvalidItem);
+                return;
+            }
+
+            var fakeLocalizedName = LocalizationManager.Instance.Get("items", "name", sourceDesignItem.Template.Id, houseTemplate.Name);
+            if (fakeLocalizedName.EndsWith(" Design"))
+                fakeLocalizedName.Replace(" Design", "");
+
+            // Spawn the actual house
             var house = Create(designId);
+            house.Name = fakeLocalizedName;
             house.Id = HousingIdManager.Instance.GetNextId();
             house.Position = position;
             house.Position.RotationZ = MathUtil.ConvertRadianToDirection(zRot);
@@ -378,6 +463,11 @@ namespace AAEmu.Game.Core.Managers
 
             connection.ActiveChar.SendPacket(new SCMyHousePacket(house));
             house.Spawn();
+
+            // Send first week tax
+            var newMail = new MailForTax(house);
+            newMail.Finalize();
+            newMail.Send();
         }
 
         public void ChangeHousePermission(GameConnection connection, ushort tlId, HousingPermission permission)
@@ -448,13 +538,51 @@ namespace AAEmu.Game.Core.Managers
             }
         }
 
+        public bool CalculateBuildingTaxInfo(uint AccountId, HousingTemplate newHouseTemplate, bool buildingNewHouse, out int totalTaxToPay, out int heavyHouseCount, out int normalHouseCount, out int hostileTaxRate)
+        {
+            totalTaxToPay = 0;
+            heavyHouseCount = 0;
+            normalHouseCount = 0;
+            hostileTaxRate = 0; // NOTE: When castles are added, this needs to be updated depending on ruling guild's settings
+
+            Dictionary<uint, House> userHouses = new Dictionary<uint, House>();
+            if (GetByAccountId(userHouses, AccountId) <= 0)
+                return false;
+
+            foreach (var h in userHouses)
+            {
+                if (h.Value.Template.HeavyTax)
+                    heavyHouseCount++;
+                else
+                    normalHouseCount++;
+            }
+
+            if (buildingNewHouse)
+            {
+                if (newHouseTemplate.HeavyTax)
+                    heavyHouseCount++;
+                else
+                    normalHouseCount++;
+            }
+
+            var taxMultiplier = (heavyHouseCount < MAX_HEAVY_TAX_COUNTED ? heavyHouseCount : MAX_HEAVY_TAX_COUNTED) * 0.5f;
+            if (heavyHouseCount < 3)
+                taxMultiplier = 1f;
+
+            totalTaxToPay = (int)Math.Ceiling(newHouseTemplate.Taxation.Tax * taxMultiplier);
+            if (buildingNewHouse)
+                totalTaxToPay += (int)(newHouseTemplate.Taxation.Tax * 2);
+
+            return true;
+        }
+
+        /*
         public bool GetWeeklyTaxInfo(House house, out int weeklyTax, out int heavyHouseCount, out int normalHouseCount, out int hostileTaxRate)
         {
             weeklyTax = 0;
             heavyHouseCount = 0;
             normalHouseCount = 0;
             hostileTaxRate = 0; // NOTE: When castles are added, this needs to be updated depending on ruling guild's settings
-            var maxheavyCounted = 10; // Maximum number of heavy tax buildings to take into account for tax calculation
 
             Dictionary<uint, House> userHouses = new Dictionary<uint, House>();
             if (GetByAccountId(userHouses, house.AccountId) <= 0)
@@ -468,7 +596,7 @@ namespace AAEmu.Game.Core.Managers
                     normalHouseCount++;
             }
 
-            var taxMultiplier = (heavyHouseCount < maxheavyCounted ? heavyHouseCount : maxheavyCounted) * 0.5f;
+            var taxMultiplier = (heavyHouseCount < MAX_HEAVY_TAX_COUNTED ? heavyHouseCount : MAX_HEAVY_TAX_COUNTED) * 0.5f;
             if (heavyHouseCount < 3)
                 taxMultiplier = 1f;
 
@@ -476,6 +604,7 @@ namespace AAEmu.Game.Core.Managers
 
             return true;
         }
+        */
 
         public void UpdateTaxInfo(House house)
         {

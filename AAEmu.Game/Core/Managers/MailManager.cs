@@ -416,10 +416,7 @@ namespace AAEmu.Game.Core.Managers
                 return false;
             }
 
-            var fsets = new FeatureSet();
-            var useTaxCertificates = fsets.Check(Feature.taxItem);
-
-            if (useTaxCertificates)
+            if (FeaturesManager.Fsets.Check(Feature.taxItem))
             {
                 // use Tax Certificates as payment
                 // TODO: grab these values from DB somewhere ?

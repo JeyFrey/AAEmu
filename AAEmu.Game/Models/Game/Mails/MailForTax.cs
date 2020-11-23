@@ -64,9 +64,12 @@ namespace AAEmu.Game.Models.Game.Mails
             Title = "title(" + zone.GroupId.ToString() + ")"; // Title calls a function to call zone group name
 
             // Get Tax info
+            if (!HousingManager.Instance.CalculateBuildingTaxInfo(_house.AccountId, _house.Template, false, out var totalTaxAmountDue, out var heavyTaxHouseCount, out var normalTaxHouseCount, out var hostileTaxRate))
+                return false;
+            /*
             if (!HousingManager.Instance.GetWeeklyTaxInfo(_house, out var totalTaxAmountDue, out var heavyTaxHouseCount, out var normalTaxHouseCount, out var hostileTaxRate))
                 return false;
-
+            */
             var taxDueTime = _house.ProtectionEndDate.AddDays(-7);
 
 

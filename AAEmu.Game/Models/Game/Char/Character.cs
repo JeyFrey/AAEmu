@@ -1270,9 +1270,9 @@ namespace AAEmu.Game.Models.Game.Char
             }
         }
 
-        public bool ChangeMoney(SlotType moneylocation, int amount) => ChangeMoney(SlotType.None, moneylocation, amount);
+        public bool ChangeMoney(SlotType moneylocation, int amount, ItemTaskType itemTaskType = ItemTaskType.DepositMoney) => ChangeMoney(SlotType.None, moneylocation, amount, itemTaskType);
 
-        public bool ChangeMoney(SlotType typeFrom, SlotType typeTo, int amount)
+        public bool ChangeMoney(SlotType typeFrom, SlotType typeTo, int amount, ItemTaskType itemTaskType = ItemTaskType.DepositMoney)
         {
             var itemTasks = new List<ItemTask>();
             switch(typeFrom)
@@ -1307,22 +1307,22 @@ namespace AAEmu.Game.Models.Game.Char
                     itemTasks.Add(new MoneyChangeBank(amount));
                     break;
             }
-            SendPacket(new SCItemTaskSuccessPacket(ItemTaskType.DepositMoney, itemTasks, new List<ulong>()));
+            SendPacket(new SCItemTaskSuccessPacket(itemTaskType, itemTasks, new List<ulong>()));
             return true;
         }
 
-        public bool AddMoney(SlotType moneyLocation,int amount)
+        public bool AddMoney(SlotType moneyLocation,int amount, ItemTaskType itemTaskType = ItemTaskType.DepositMoney)
         {
             if (amount < 0)
                 return false;
-            return ChangeMoney(SlotType.None, moneyLocation, amount);
+            return ChangeMoney(SlotType.None, moneyLocation, amount, itemTaskType);
         }
 
-        public bool SubtractMoney(SlotType moneyLocation, int amount)
+        public bool SubtractMoney(SlotType moneyLocation, int amount, ItemTaskType itemTaskType = ItemTaskType.DepositMoney)
         {
             if (amount < 0)
                 return false;
-            return ChangeMoney(SlotType.None, moneyLocation, -amount);
+            return ChangeMoney(SlotType.None, moneyLocation, -amount, itemTaskType);
         }
 
 
