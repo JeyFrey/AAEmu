@@ -67,7 +67,7 @@ namespace AAEmu.Game.Scripts.Commands
                     case "list":
                         character.SendMessage("[TestMail] List of Mails");
                         foreach (var m in MailManager.Instance.GetCurrentMailList(character))
-                            character.SendMessage("{0} - {1} - {2}", m.Value.Id, m.Value.MailType, m.Value.Title);
+                            character.SendMessage("{0} - {1} - ({3}) {2}", m.Value.Id, m.Value.MailType, m.Value.Title, m.Value.Header.Status);
                         character.SendMessage("[TestMail] End of List");
                         return;
                     case "clear":
@@ -87,6 +87,10 @@ namespace AAEmu.Game.Scripts.Commands
                         {
                             character.SendMessage("[TestMail] please select a building first");
                         }
+                        return;
+                    case "check":
+                        character.Mails.SendUnreadMailCount();
+                        character.SendMessage("[TestMail] {0} unread mails", character.Mails.unreadMailCount.Received);
                         return;
                     default:
                         if (MailType.TryParse(args[0], out MailType mTypeByName))
