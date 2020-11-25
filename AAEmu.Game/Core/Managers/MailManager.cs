@@ -478,6 +478,7 @@ namespace AAEmu.Game.Core.Managers
                 _log.Error("Could not update protection time when paying taxes, mailId {0}", mail.Id);
             else
             {
+                character.SendPacket(new SCChargeMoneyPaid(mail.Id));
                 character.SendPacket(new SCMailDeletedPacket(false, mail.Id, false, character.Mails.unreadMailCount));
                 DeleteMail(mail);
             }
