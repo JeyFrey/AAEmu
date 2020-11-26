@@ -39,7 +39,7 @@ namespace AAEmu.Game.Core.Managers
             return values.Count;
         }
 
-        public House Create(uint templateId, uint objectId = 0, ushort tlId = 0)
+        public House Create(uint templateId, uint factionId, uint objectId = 0, ushort tlId = 0)
         {
             if (!_housingTemplates.ContainsKey(templateId))
                 return null;
@@ -51,9 +51,8 @@ namespace AAEmu.Game.Core.Managers
             house.ObjId = objectId > 0 ? objectId : ObjectIdManager.Instance.GetNextId();
             house.Template = template;
             house.TemplateId = template.Id;
-            house.Faction = FactionManager.Instance.GetFaction(1); // TODO: Inherit from owner
-            // TODO: Localize this name, where do I find the name ?
-            house.Name = template.Name;
+            house.Faction = FactionManager.Instance.GetFaction(factionId); // TODO: Inherit from owner
+            house.Name = LocalizationManager.Instance.Get("housings", "name", template.Id);
             house.Hp = house.MaxHp;
 
             // Permanent Untouchable buff, remove the buff when failed tax payment
@@ -244,7 +243,8 @@ namespace AAEmu.Game.Core.Managers
                         while (reader.Read())
                         {
                             var templateId = reader.GetUInt32("template_id");
-                            var house = Create(templateId);
+                            var factionId = reader.GetUInt32("faction_id");
+                            var house = Create(templateId, factionId);
                             house.Id = reader.GetUInt32("id");
                             house.AccountId = reader.GetUInt32("account_id");
                             house.OwnerId = reader.GetUInt32("owner");
@@ -434,13 +434,18 @@ namespace AAEmu.Game.Core.Managers
                 return;
             }
 
-            var fakeLocalizedName = LocalizationManager.Instance.Get("items", "name", sourceDesignItem.Template.Id, houseTemplate.Name);
-            if (fakeLocalizedName.EndsWith(" Design"))
-                fakeLocalizedName.Replace(" Design", "");
-
             // Spawn the actual house
-            var house = Create(designId);
-            house.Name = fakeLocalizedName;
+            var house = Create(designId,connection.ActiveChar.Faction.Id);
+
+            // Fallback for un-translated buildings (en_us)
+            if (house.Name == string.Empty)
+            {
+                var fakeLocalizedName = LocalizationManager.Instance.Get("items", "name", sourceDesignItem.Template.Id, houseTemplate.Name);
+                if (fakeLocalizedName.EndsWith(" Design"))
+                    fakeLocalizedName = fakeLocalizedName.Replace(" Design", "");
+                house.Name = fakeLocalizedName;
+            }
+
             house.Id = HousingIdManager.Instance.GetNextId();
             house.Position = position;
             house.Position.RotationZ = MathUtil.ConvertRadianToDirection(zRot);
@@ -454,7 +459,7 @@ namespace AAEmu.Game.Core.Managers
             house.OwnerId = connection.ActiveChar.Id;
             house.CoOwnerId = connection.ActiveChar.Id;
             house.AccountId = connection.AccountId;
-            house.Permission = HousingPermission.Public;
+            house.Permission = HousingPermission.Private;
             house.PlaceDate = DateTime.UtcNow;
             house.ProtectionEndDate = DateTime.UtcNow.AddDays(7);
             _houses.Add(house.Id, house);
@@ -549,6 +554,7 @@ namespace AAEmu.Game.Core.Managers
             if (GetByAccountId(userHouses, AccountId) <= 0)
                 return false;
 
+            // Count the houses on this account
             foreach (var h in userHouses)
             {
                 if (h.Value.Template.HeavyTax)
@@ -557,6 +563,7 @@ namespace AAEmu.Game.Core.Managers
                     normalHouseCount++;
             }
 
+            // If this is for a new building, add 1 to count
             if (buildingNewHouse)
             {
                 if (newHouseTemplate.HeavyTax)
@@ -565,11 +572,15 @@ namespace AAEmu.Game.Core.Managers
                     normalHouseCount++;
             }
 
+            // Default Heavy Tax formula for 1.2
             var taxMultiplier = (heavyHouseCount < MAX_HEAVY_TAX_COUNTED ? heavyHouseCount : MAX_HEAVY_TAX_COUNTED) * 0.5f;
-            if (heavyHouseCount < 3)
+            // If less than 3 properties, or not a heavy tax peroperty, no extra multiplier needed
+            if ((heavyHouseCount < 3) || (newHouseTemplate.HeavyTax == false))
                 taxMultiplier = 1f;
 
             totalTaxToPay = (int)Math.Ceiling(newHouseTemplate.Taxation.Tax * taxMultiplier);
+
+            // If this is a new house, add the deposit (base tax * 2)
             if (buildingNewHouse)
                 totalTaxToPay += (int)(newHouseTemplate.Taxation.Tax * 2);
 

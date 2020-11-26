@@ -17,7 +17,7 @@ namespace AAEmu.Game.Core.Managers
         
         public void Initialize()
         {
-            _log.Info("Loading Features ...");
+            _log.Info("Initializing Features ...");
             Fsets = new FeatureSet();
 
             //Disables Auction Button
@@ -33,7 +33,16 @@ namespace AAEmu.Game.Core.Managers
             Fsets.Set(Feature.ingameshopSecondpass, false);
             Fsets.Set(Feature.itemSecure, false);
 
-            _log.Info("Loaded Features");
+            //Fsets.Set(Feature.taxItem, false);
+
+            var featsOn = string.Empty;
+            foreach (var fObj in Enum.GetValues(typeof(Feature)))
+            {
+                var f = (Feature)fObj;
+                if (FeaturesManager.Fsets.Check(f))
+                    featsOn += f.ToString() + "  ";
+            }
+            _log.Info("Enabled Features: {0}",featsOn);
         }
 
     }

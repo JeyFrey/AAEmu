@@ -469,7 +469,7 @@ namespace AAEmu.Game.Core.Managers
                 }
                 else
                 {
-                    character.ChangeMoney(SlotType.Inventory, mail.Body.BillingAmount);
+                    character.SubtractMoney(SlotType.Inventory, mail.Body.BillingAmount);
                 }
 
             }
