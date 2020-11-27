@@ -70,15 +70,13 @@ namespace AAEmu.Game.Models.Game.Mails
             if (!HousingManager.Instance.GetWeeklyTaxInfo(_house, out var totalTaxAmountDue, out var heavyTaxHouseCount, out var normalTaxHouseCount, out var hostileTaxRate))
                 return false;
             */
-            var taxDueTime = _house.ProtectionEndDate.AddDays(-7);
-
 
             //testmail 6 .houseTax title(25) "body('Test','1606565186','1607169986','1606565186','250000','50','3','0','500000','true','1')" 0 500000
             Body.Text = string.Format("body('{0}', '{1}', '{2}', '{3}', '{4}', '{5}', '{6}', '{7}', '{8}', '{9}', '{10}')",
                 _house.Name,                                 // House Name
                 ToUnixTime(_house.PlaceDate),                // Tax period start (this might need to be the same as tax due date)
                 ToUnixTime(_house.ProtectionEndDate),        // Tax period end
-                ToUnixTime(taxDueTime),                      // Tax Due Date
+                ToUnixTime(_house.TaxDueDate),               // Tax Due Date
                 _house.Template.Taxation.Tax,                // This house base tax rate
                 hostileTaxRate,                              // dominion tax rate (castle tax rate ?)
                 heavyTaxHouseCount,                          // number of heavy tax houses
@@ -88,9 +86,9 @@ namespace AAEmu.Game.Models.Game.Mails
                 normalTaxHouseCount                          // number of tax-excempt houses
                 );
             // In never version this has a extra field at the end, which I assume is would be the hostile tax rate
+            // TODO: Make better use of unpaidweekcount
 
             Body.BillingAmount = totalTaxAmountDue;
-
 
             // Extra tag
             ushort extraUnknown = 0;

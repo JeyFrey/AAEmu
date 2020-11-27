@@ -28,6 +28,7 @@ namespace AAEmu.Game.Core.Managers
         private Dictionary<uint, House> _houses;
         private Dictionary<ushort, House> _housesTl; // TODO or so mb tlId is id in the active zone? or type of house
         private List<uint> _removedHousings;
+        private List<HousingItemHousings> _housingItemHousings;
         private static uint BUFF_UNTOUCHABLE = 545;
         private static int MAX_HEAVY_TAX_COUNTED = 10; // Maximum number of heavy tax buildings to take into account for tax calculation
 
@@ -35,6 +36,14 @@ namespace AAEmu.Game.Core.Managers
         {
             foreach (var (id, house) in _houses)
                 if (house.AccountId == accountId)
+                    values.Add(id, house);
+            return values.Count;
+        }
+
+        public int GetByCharacterId(Dictionary<uint, House> values, uint characterId)
+        {
+            foreach (var (id, house) in _houses)
+                if (house.OwnerId == characterId)
                     values.Add(id, house);
             return values.Count;
         }
@@ -76,28 +85,50 @@ namespace AAEmu.Game.Core.Managers
             _houses = new Dictionary<uint, House>();
             _housesTl = new Dictionary<ushort, House>();
             _removedHousings = new List<uint>();
+            _housingItemHousings = new List<HousingItemHousings>();
 
-//            var housingAreas = new Dictionary<uint, HousingAreas>();
+            //            var housingAreas = new Dictionary<uint, HousingAreas>();
             var houseTaxes = new Dictionary<uint, HouseTax>();
 
             using (var connection = SQLite.CreateConnection())
             {
-//                using (var command = connection.CreateCommand())
-//                {
-//                    command.CommandText = "SELECT * FROM housing_areas";
-//                    command.Prepare();
-//                    using (var reader = new SQLiteWrapperReader(command.ExecuteReader()))
-//                    {
-//                        while (reader.Read())
-//                        {
-//                            var template = new HousingAreas();
-//                            template.Id = reader.GetUInt32("id");
-//                            template.Name = reader.GetString("name");
-//                            template.GroupId = reader.GetUInt32("housing_group_id");
-//                            housingAreas.Add(template.Id, template);
-//                        }
-//                    }
-//                }
+                _log.Info("Loading Housing Information ...");
+
+                /*
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT * FROM housing_areas";
+                    command.Prepare();
+                    using (var reader = new SQLiteWrapperReader(command.ExecuteReader()))
+                    {
+                        while (reader.Read())
+                        {
+                            var template = new HousingAreas();
+                            template.Id = reader.GetUInt32("id");
+                            template.Name = reader.GetString("name");
+                            template.GroupId = reader.GetUInt32("housing_group_id");
+                            housingAreas.Add(template.Id, template);
+                        }
+                    }
+                }
+                */
+
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT * FROM item_housings";
+                    command.Prepare();
+                    using (var reader = new SQLiteWrapperReader(command.ExecuteReader()))
+                    {
+                        while (reader.Read())
+                        {
+                            var template = new HousingItemHousings();
+                            template.Id = reader.GetUInt32("id");
+                            template.Item_Id = reader.GetUInt32("item_id");
+                            template.Design_Id = reader.GetUInt32("design_id");
+                            _housingItemHousings.Add(template);
+                        }
+                    }
+                }
 
                 using (var command = connection.CreateCommand())
                 {
@@ -260,7 +291,7 @@ namespace AAEmu.Game.Core.Managers
                             house.ProtectionEndDate = reader.GetDateTime("protected_until");
                             _houses.Add(house.Id, house);
                             _housesTl.Add(house.TlId, house);
-                            UpdateTaxInfo(house);
+                            UpdateTaxInfo(house,false);
                             house.IsDirty = false;
                         }
                     }
@@ -464,7 +495,7 @@ namespace AAEmu.Game.Core.Managers
             house.ProtectionEndDate = DateTime.UtcNow.AddDays(7);
             _houses.Add(house.Id, house);
             _housesTl.Add(house.TlId, house);
-            UpdateTaxInfo(house);
+            UpdateTaxInfo(house,false);
 
             connection.ActiveChar.SendPacket(new SCMyHousePacket(house));
             house.Spawn();
@@ -519,28 +550,67 @@ namespace AAEmu.Game.Core.Managers
         public void Demolish(GameConnection connection, House house)
         {
             if (!_houses.ContainsKey(house.Id))
-                return; // TODO: Send error
+            {
+                connection.ActiveChar.SendErrorMessage(ErrorMessageType.InvalidHouseInfo);
+                return;
+            }
             // Check if owner
             if (house.OwnerId == connection.ActiveChar.Id)
             {
                 // TODO: check if tax payed, cannot manually demolish or sell a house with unpaid taxes
+                if (house.TaxDueDate > DateTime.UtcNow)
+                {
+                    connection.ActiveChar.SendErrorMessage(ErrorMessageType.HouseCannotDemolishUnpaidTax);
+                    return;
+                }
 
+                // Make sure to call UpdateTaxInfo first to remove tax-rated mails of this house
+                UpdateTaxInfo(house, true);
+                // Return items to player by mail
+                ReturnHouseItemsToOwner(house, false);
+                // Remove owner
+                house.OwnerId = 0;
+                house.CoOwnerId = 0;
+                connection.ActiveChar.BroadcastPacket(new SCHouseDemolishedPacket(house.TlId), true);
+                connection.SendPacket(new SCMyHouseRemovedPacket(house.TlId));
+                // Make killable
+                UpdateHouseFaction(house, (uint)Factions.FACTION_MONSTROSITY);
+                house.Effects.RemoveBuff(BUFF_UNTOUCHABLE);
+
+                /*
                 _removedHousings.Add(house.Id);
                 _houses.Remove(house.Id);
                 _housesTl.Remove(house.TlId);
 
                 house.Delete();
                 connection.ActiveChar.BroadcastPacket(new SCHouseDemolishedPacket(house.TlId), true);
+                // Remove house from the world
                 connection.SendPacket(new SCMyHouseRemovedPacket(house.TlId));
-
                 HousingTldManager.Instance.ReleaseId(house.TlId);
                 HousingIdManager.Instance.ReleaseId(house.Id);
+                */
             }
             else
             {
-                // TODO: Send error...
                 // Non-owner should not be able to press demolish
+                connection.ActiveChar.SendErrorMessage(ErrorMessageType.InvalidHouseInfo);
+                return;
             }
+        }
+
+        public void RemoveDeadHouse(House house)
+        {
+            // Remove house from housing tables
+            _removedHousings.Add(house.Id);
+            _houses.Remove(house.Id);
+            _housesTl.Remove(house.TlId);
+            HousingTldManager.Instance.ReleaseId(house.TlId);
+            HousingIdManager.Instance.ReleaseId(house.Id);
+            // TODO: not sure how to handle this, just insta-delete it for now
+            house.Delete();
+            // TODO: Add to despawn handler
+            //house.Despawn = DateTime.Now.AddSeconds(20);
+            //SpawnManager.Instance.AddDespawn(house);
         }
 
         public bool CalculateBuildingTaxInfo(uint AccountId, HousingTemplate newHouseTemplate, bool buildingNewHouse, out int totalTaxToPay, out int heavyHouseCount, out int normalHouseCount, out int hostileTaxRate)
@@ -617,9 +687,11 @@ namespace AAEmu.Game.Core.Managers
         }
         */
 
-        public void UpdateTaxInfo(House house)
+        public void UpdateTaxInfo(House house, bool isDemolished)
         {
             // TODO: update corresponding mails if needed
+            if (isDemolished)
+                MailManager.Instance.DeleteHouseMails(house.Id);
         }
 
         public bool PayWeeklyTax(House house)
@@ -634,5 +706,102 @@ namespace AAEmu.Game.Core.Managers
                 return house;
             return null;
         }
+
+        public void UpdateHouseFaction(House house, uint factionId)
+        {
+            house.BroadcastPacket(new SCUnitFactionChangedPacket(house.ObjId, house.Name, house.Faction.Id, factionId, false), true);
+            house.Faction = FactionManager.Instance.GetFaction(factionId);
+        }
+
+        public void UpdateOwnedHousingFaction(uint characterId, uint factionId)
+        {
+            Dictionary<uint, House> myHouses = new Dictionary<uint, House>();
+            GetByCharacterId(myHouses, characterId);
+            foreach(var h in myHouses)
+                if (h.Value.Faction.Id != factionId)
+                    UpdateHouseFaction(h.Value, factionId);
+        }
+
+        public void ReturnHouseItemsToOwner(House house, bool failedToPayTax)
+        {
+
+            List<Item> returnedItems = new List<Item>();
+            var returnedMoney = 0;
+
+            // TODO: proper grades for design
+            var designItemId = GetItemIdByDesign(house.Template.Id);
+            var designItem = ItemManager.Instance.Create(designItemId, 1, 0);
+            designItem.OwnerId = house.OwnerId;
+            designItem.SlotType = SlotType.Mail;
+            returnedItems.Add(designItem);
+
+            // TODO: Grab a list of items in chests
+            // TODO: Grab a list of furniture
+
+            if (!failedToPayTax)
+            {
+                if (FeaturesManager.Fsets.Check(Models.Game.Features.Feature.taxItem))
+                {
+                    var taxItem = ItemManager.Instance.Create(Item.BoundTaxCertificate, (int)(house.Template.Taxation.Tax / 5000), 0);
+                    taxItem.OwnerId = house.OwnerId;
+                    taxItem.SlotType = SlotType.Mail;
+                    returnedItems.Add(taxItem);
+                }
+                else
+                {
+                    returnedMoney = (int)(house.Template.Taxation.Tax * 2);
+                }
+            }
+
+            // TODO: Proper Mail handler
+            BaseMail newMail = null;
+            for (var i = 0; i < returnedItems.Count; i++)
+            {
+                // Split items into mails of maximum 10 attachemnts
+                if ((i % 10) == 0)
+                {
+                    // TODO: proper mail handler
+                    newMail = new BaseMail();
+                    newMail.ReceiverName = NameManager.Instance.GetCharacterName(house.OwnerId);
+                    newMail.Header.ReceiverId = house.OwnerId;
+                    newMail.Header.SenderId = 0;
+                    newMail.Header.SenderName = ".houseDemolish";
+                    if (failedToPayTax)
+                        newMail.Title = "Missed tax payment";
+                    else
+                        newMail.Title = "Demolished house";
+                    newMail.Body.Text = "Placeholder text;\r\nReturning items for demolished building \r\n" + house.Name;
+                    newMail.Body.SendDate = DateTime.UtcNow;
+                    if (failedToPayTax)
+                        newMail.Body.RecvDate = DateTime.UtcNow.AddHours(22);
+                    else
+                        newMail.Body.RecvDate = DateTime.UtcNow;
+                    newMail.Header.Extra = house.Id;
+                }
+                // Only attach money to first mail
+                if ((returnedMoney > 0) && (i == 0))
+                    newMail.AttachMoney(returnedMoney);
+
+                // Attach item
+                newMail.Body.Attachments.Add(returnedItems[i]);
+
+                // Send on last or 10th item of the mail
+                if (((i % 10) == 9) || (i == returnedItems.Count-1))
+                    newMail.Send();
+            }
+        }
+
+        public uint GetDesignByItemId(uint itemId)
+        {
+            var design = _housingItemHousings.Where(h => h.Item_Id == itemId).First();
+            return design?.Design_Id ?? 0;
+        }
+
+        public uint GetItemIdByDesign(uint designId)
+        {
+            var design = _housingItemHousings.Where(h => h.Design_Id == designId).First();
+            return design?.Item_Id ?? 0;
+        }
+
     }
 }

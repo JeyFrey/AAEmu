@@ -1373,6 +1373,7 @@ namespace AAEmu.Game.Models.Game.Char
             var newFaction = pirate ? (uint)Factions.FACTION_PIRATE : defaultFactionId;
             BroadcastPacket(new SCUnitFactionChangedPacket(ObjId, Name, Faction.Id, newFaction, false), true);
             Faction = FactionManager.Instance.GetFaction(newFaction);
+            HousingManager.Instance.UpdateOwnedHousingFaction(Id, newFaction);
             // TODO : Teleport to Growlgate
             // TODO : Leave guild
         }
@@ -1749,6 +1750,8 @@ namespace AAEmu.Game.Models.Game.Char
 
             Mails = new CharacterMails(this);
             MailManager.Instance.GetCurrentMailList(this); //Doesn't need a connection, but does need to load after the inventory
+            // Update sync housing factions on login
+            HousingManager.Instance.UpdateOwnedHousingFaction(this.Id, this.Faction.Id);
         }
 
         public bool SaveDirectlyToDatabase()

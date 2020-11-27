@@ -375,6 +375,20 @@ namespace AAEmu.Game.Core.Managers
             return false;
         }
 
+        public bool NotifyDeleteMailByNameIfOnline(BaseMail m, string receiverName)
+        {
+            _log.Trace("NotifyDeleteMailByNameIfOnline() - {0}", receiverName);
+            var player = WorldManager.Instance.GetCharacter(receiverName);
+            if (player != null)
+            {
+                if (m.Header.Status != MailStatus.Read)
+                    player.Mails.unreadMailCount.Received--;
+                player.SendPacket(new SCMailDeletedPacket(false, m.Id, true, player.Mails.unreadMailCount));
+                return true;
+            }
+            return false;
+        }
+
         public void CheckAllMailTimings()
         {
             // Deliver yet "undelivered" mails
@@ -493,5 +507,35 @@ namespace AAEmu.Game.Core.Managers
             return true;
         }
 
+        public void ExtractExtraForHouse(long extra, out ushort zoneGroupId, out uint houseId)
+        {
+            houseId = (uint)(extra & 0xFFFFFFFF); // Extract house DB Id from Extra
+            zoneGroupId = (ushort)((extra >> 48) & 0xFFFF); // Extract zone group Id from Extra
+        }
+
+
+        public void DeleteHouseMails(uint houseId)
+        {
+            var deleteList = new List<long>();
+            // Check which mails to remove
+            foreach(var m in _allPlayerMails)
+            {
+                if (m.Value.MailType == MailType.Billing)
+                {
+                    ExtractExtraForHouse(m.Value.Header.Extra, out var zgId, out var hId);
+                    if (houseId == hId)
+                    {
+                        deleteList.Add(m.Value.Id);
+                    }
+                }
+            }
+            // Actually remove them by Id
+            foreach (var d in deleteList)
+            {
+                var mail = GetMailById(d);
+                NotifyDeleteMailByNameIfOnline(mail, mail.ReceiverName);
+                DeleteMail(mail);
+            }
+        }
     }
 }
