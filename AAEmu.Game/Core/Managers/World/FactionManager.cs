@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using AAEmu.Commons.Utils;
@@ -12,7 +12,8 @@ namespace AAEmu.Game.Core.Managers.World
 {
     public enum Factions
     {
-        FACTION_PIRATE = 161
+        FACTION_MONSTROSITY = 115,
+        FACTION_PIRATE = 161,
     }
     
     public class FactionManager : Singleton<FactionManager>

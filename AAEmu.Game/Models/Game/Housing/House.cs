@@ -6,6 +6,8 @@ using AAEmu.Commons.Utils;
 using AAEmu.Game.Core.Managers;
 using AAEmu.Game.Core.Managers.Id;
 using AAEmu.Game.Core.Managers.UnitManagers;
+using AAEmu.Game.Core.Managers.World;
+using AAEmu.Game.Core.Network.Game;
 using AAEmu.Game.Core.Packets.G2C;
 using AAEmu.Game.Models.Game.Char;
 using AAEmu.Game.Models.Game.DoodadObj;
@@ -41,6 +43,7 @@ namespace AAEmu.Game.Models.Game.Housing
         private HousingPermission _permission;
         private int _numAction;
         private DateTime _placeDate;
+        private DateTime _protectionEndDate;
 
         /// <summary>
         /// IsDirty flag for Houses, not all properties are taken into account here as most of the data that needs to be updated will never change
@@ -104,6 +107,8 @@ namespace AAEmu.Game.Models.Game.Housing
             }
         }
         public DateTime PlaceDate { get => _placeDate; set { _placeDate = value; _isDirty = true; } }
+        public DateTime ProtectionEndDate { get => _protectionEndDate; set { _protectionEndDate = value; _isDirty = true; } }
+        public DateTime TaxDueDate { get => _protectionEndDate.AddDays(-7); }
 
         public override int MaxHp => Template.Hp;
         public override UnitCustomModelParams ModelParams { get; set; }
@@ -115,6 +120,7 @@ namespace AAEmu.Game.Models.Game.Housing
             ModelParams = new UnitCustomModelParams();
             AttachedDoodads = new List<Doodad>();
             IsDirty = true;
+            Events.OnDeath += OnDeath ;
         }
 
         public void AddBuildAction()
@@ -136,10 +142,6 @@ namespace AAEmu.Game.Models.Game.Housing
                     else
                     {
                         CurrentStep = -1;
-
-                        // Save moved to SaveManager
-                        //using (var connection = MySQL.CreateConnection())
-                        //    Save(connection);
                     }
                 }
             }
@@ -213,6 +215,13 @@ namespace AAEmu.Game.Models.Game.Housing
                 character.SendPacket(new SCDoodadsRemovedPacket(last, temp));
             }
         }
+
+        public override void BroadcastPacket(GamePacket packet, bool self)
+        {
+            foreach (var character in WorldManager.Instance.GetAround<Character>(this))
+                character.SendPacket(packet);
+        }
+
         #endregion
 
         public bool Save(MySqlConnection connection, MySqlTransaction transaction = null)
@@ -226,8 +235,8 @@ namespace AAEmu.Game.Models.Game.Housing
 
                 command.CommandText =
                     "REPLACE INTO `housings` " +
-                    "(`id`,`account_id`,`owner`,`co_owner`,`template_id`,`name`,`x`,`y`,`z`,`rotation_z`,`current_step`,`current_action`,`permission`) " +
-                    "VALUES(@id,@account_id,@owner,@co_owner,@template_id,@name,@x,@y,@z,@rotation_z,@current_step,@current_action,@permission)";
+                    "(`id`,`account_id`,`owner`,`co_owner`,`template_id`,`name`,`x`,`y`,`z`,`rotation_z`,`current_step`,`current_action`,`permission`,`place_date`,`protected_until`,`faction_id`) " +
+                    "VALUES(@id,@account_id,@owner,@co_owner,@template_id,@name,@x,@y,@z,@rotation_z,@current_step,@current_action,@permission,@placedate,@protecteduntil,@factionid)";
 
                 command.Parameters.AddWithValue("@id", Id);
                 command.Parameters.AddWithValue("@account_id", AccountId);
@@ -242,6 +251,9 @@ namespace AAEmu.Game.Models.Game.Housing
                 command.Parameters.AddWithValue("@current_step", CurrentStep);
                 command.Parameters.AddWithValue("@current_action", NumAction);
                 command.Parameters.AddWithValue("@permission", (byte)Permission);
+                command.Parameters.AddWithValue("@placedate", PlaceDate);
+                command.Parameters.AddWithValue("@protecteduntil", ProtectionEndDate);
+                command.Parameters.AddWithValue("@factionid", Faction.Id);
                 command.ExecuteNonQuery();
             }
             return true;
@@ -284,5 +296,12 @@ namespace AAEmu.Game.Models.Game.Housing
             stream.Write(""); // sellToName
             return stream;
         }
+
+        public void OnDeath(object sender, EventArgs args)
+        {
+            _log.Debug("House died ObjId:{0} - TemplateId:{1} - {2}", ObjId, TemplateId, Name);
+            HousingManager.Instance.RemoveDeadHouse(this);
+        }
+
     }
 }

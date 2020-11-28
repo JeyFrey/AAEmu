@@ -32,5 +32,6 @@ namespace AAEmu.Game.Models.Game.Mails
             stream.Write(Extra);
             return stream;
         }
+
     }
 }
